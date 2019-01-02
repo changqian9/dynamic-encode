@@ -3,6 +3,7 @@ import sys
 import subprocess
 import tempfile
 import json
+import argparse
 
 common_settings = '-preset slow -b-pyramid normal -bf 3 -b_strategy 2 -err_detect compliant -mbtree 1 -tune film'
 variants_path = './data/variants.json'
@@ -68,7 +69,7 @@ def do_merge(segment_list, output_video):
             f.write("file '%s'\n" % seg_video)
         f.seek(0)
         print(f.read())
-        ffmpeg_cmd = 'ffmpeg -hide_banner -f concat -safe 0 -i {segment_list_file}  -c copy {output_video} -y'.format(
+        ffmpeg_cmd = 'ffmpeg -hide_banner -f concat -safe 0 -i {segment_list_file} -c copy {output_video} -y'.format(
                 segment_list_file=f.name,
                 output_video=output_video,
             );
@@ -107,14 +108,18 @@ def get_segment_list(input_video):
         seg_duration_list.append(duration / seg_size)
         seg_crf_list.append(30 - seg_idx)
 
-    return seg_start_list, seg_duration_list, seg_crf_list, '854x480'
+    return seg_start_list, seg_duration_list, seg_crf_list
     
 if __name__ == '__main__':
     if len(sys.argv) < 1:
         print_usage()
         sys.exit(-1)
+    parser = argparse.ArgumentParser(description='Dynamic CRF encoding')
+    parser.add_argument('input_video', help='Input video file path.')
+    parser.add_argument('output_video', help='Output video file path.')
+    parser.add_argument('output_res', help='Output video resolution, in widthxheight format.')
+
+    args = parser.parse_args()
+    seg_start_list, seg_duration_list, seg_crf_list = get_segment_list(args.input_video)
     
-    input_video = '~/Movies/Bhavesh_60sec.mxf'
-    seg_start_list, seg_duration_list, seg_crf_list, dst_res = get_segment_list(input_video)
-    
-    encode_final(input_video, "test.mp4", dst_res, seg_start_list, seg_duration_list, seg_crf_list, False)
+    encode_final(args.input_video, args.output_video, args.output_res, seg_start_list, seg_duration_list, seg_crf_list, False)
