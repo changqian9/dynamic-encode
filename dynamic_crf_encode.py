@@ -8,6 +8,15 @@ import argparse
 common_settings = '-preset slow -b-pyramid normal -bf 3 -b_strategy 2 -err_detect compliant -mbtree 1 -tune film'
 variants_path = './data/variants.json'
 
+def is_number(str):
+    try:
+        if str=='NaN':
+            return False
+        float(str)
+        return True
+    except ValueError:
+        return False
+
 def get_video_profile_and_level(vheight):
     profile = None
     level = None
@@ -97,18 +106,34 @@ def encode_final(input_video, output_video, vheight, seg_start_list, seg_duratio
     do_merge(segment_list, output_video)
     os.removedirs(temp_dir)
 
-def get_segment_list(input_video):
+def get_segment_list_equal_duration(input_video, seg_size = 10):
     duration = get_duration(input_video)
     seg_start_list = []
     seg_duration_list = []
     seg_crf_list = []
-
-    seg_size = 10
+ 
     for seg_idx in range(seg_size):
         seg_start_list.append(duration / seg_size * seg_idx)
         seg_duration_list.append(duration / seg_size)
         seg_crf_list.append(30 - seg_idx)
 
+    return seg_start_list, seg_duration_list, seg_crf_list
+
+def get_segment_list_from_file(list_file):
+    seg_start_list = []
+    seg_duration_list = []
+    seg_crf_list = []
+    segment_list_lines = []
+    with open(list_file, 'r') as f:
+        segment_list_lines = f.readlines()
+    for segment_line in segment_list_lines:
+        if segment_line.startswith('#'):
+            continue
+        seg_items = [item.strip() for item in segment_line.split(',')]
+        if len(seg_items) == 3 and is_number(seg_items[0]) and is_number(seg_items[1]) and is_number(seg_items[2]):
+            seg_start_list.append(float(seg_items[0]))
+            seg_duration_list.append(float(seg_items[1]))
+            seg_crf_list.append(float(seg_items[2]))
     return seg_start_list, seg_duration_list, seg_crf_list
 
 if __name__ == '__main__':
@@ -119,8 +144,7 @@ if __name__ == '__main__':
     parser.add_argument('input_video', help='Input video file path.')
     parser.add_argument('output_video', help='Output video file path.')
     parser.add_argument('video_height', help='Output video height.')
-
+    parser.add_argument('segment_list', help='Segment crf list file, line format: seg_start, seg_duration, seg_crf')
     args = parser.parse_args()
-    seg_start_list, seg_duration_list, seg_crf_list = get_segment_list(args.input_video)
-
-    encode_final(args.input_video, args.output_video, args.output_res, seg_start_list, seg_duration_list, seg_crf_list, False)
+    seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list)
+    encode_final(args.input_video, args.output_video, args.video_height, seg_start_list, seg_duration_list, seg_crf_list, False)
