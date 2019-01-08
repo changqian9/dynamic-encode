@@ -1,9 +1,11 @@
+#!/usr/bin/env python
 import os
 import sys
 import subprocess
 import tempfile
 import json
 import argparse
+import multiprocessing
 
 common_settings = '-preset slow -b-pyramid normal -bf 3 -b_strategy 2 -err_detect compliant -mbtree 1 -tune film'
 variants_path = './data/variants.json'
@@ -69,6 +71,10 @@ def encode_segment(input_video, output_video, vheight, start_time, end_time, crf
     print(ffmpeg_cmd)
     subprocess.call(ffmpeg_cmd, shell=True)
 
+def encode_segment_unpack(args):
+    print(args)
+    return encode_segment(*args)
+
 def do_clean(segment_list):
     for seg_video in segment_list:
         os.remove(seg_video)
@@ -87,7 +93,7 @@ def do_merge(segment_list, output_video):
         subprocess.call(ffmpeg_cmd, shell=True)
         do_clean(segment_list)
 
-def encode_final(input_video, output_video, vheight, seg_start_list, seg_duration_list, seg_crf_list, need_deinterlacing):
+def encode_final(input_video, output_video, vheight, seg_start_list, seg_duration_list, seg_crf_list, need_deinterlacing, poolsize):
     assert len(seg_duration_list), "Length of seg_duration_list and seg_start_list are not equal."
     assert len(seg_crf_list), "Length of seg_crf_list and seg_start_list are not equal."
 
@@ -96,13 +102,21 @@ def encode_final(input_video, output_video, vheight, seg_start_list, seg_duratio
     seg_format = temp_dir + "/seg_%d.mp4"
 
     segment_list = []
+
+    arg_list = []
     for seg_idx in range(seg_size):
         start_time = seg_start_list[seg_idx]
         end_time = start_time + seg_duration_list[seg_idx]
         seg_name = seg_format % seg_idx
-        encode_segment(input_video, seg_name, vheight, start_time, end_time, seg_crf_list[seg_idx], need_deinterlacing)
+        cur_arg = [input_video, seg_name, vheight, start_time, end_time, seg_crf_list[seg_idx], need_deinterlacing]
+
+        arg_list.append(cur_arg)
         segment_list.append(seg_name)
         
+    pool = multiprocessing.Pool(processes=poolsize)
+    pool.map(encode_segment_unpack, arg_list)
+    pool.close()
+    pool.join()
     do_merge(segment_list, output_video)
     os.removedirs(temp_dir)
 
@@ -147,4 +161,6 @@ if __name__ == '__main__':
     parser.add_argument('segment_list', help='Segment crf list file, line format: seg_start, seg_duration, seg_crf')
     args = parser.parse_args()
     seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list)
-    encode_final(args.input_video, args.output_video, args.video_height, seg_start_list, seg_duration_list, seg_crf_list, False)
+
+    poolsize = 10
+    encode_final(args.input_video, args.output_video, args.video_height, seg_start_list, seg_duration_list, seg_crf_list, False, min(poolsize, len(seg_start_list)))
