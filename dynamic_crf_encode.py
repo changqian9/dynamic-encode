@@ -53,8 +53,9 @@ def encode_segment(input_video, output_video, vheight, start_time, end_time, crf
 
     v_profilie, v_level, resolution = get_video_profile_and_level(vheight)
 
+    x264_other_opt = ":me=umh:merange=32:subme=10"
     ffmpeg_cmd = 'ffmpeg -hide_banner -ss {start_time} -to {end_time} -i {input_video} -filter_complex "[0:v]{other_filter}scale={dst_res}[vout]" \
--map [vout] -an -c:v libx264 {common_settings} -profile:v {v_profilie} -level {v_level} -crf {crf} -x264opts me=umh:merange=32:subme=10 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709  -f mp4 {output_video} -y'.format(
+            -map [vout] -an -c:v libx264 {common_settings} -profile:v {v_profilie} -level {v_level} -crf {crf} -x264opts no-scenecut:keyint=50:min-keyint=50 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709  -f mp4 {output_video} -y'.format(
                 input_video=input_video,
                 start_time=start_time,
                 end_time=end_time,
