@@ -47,7 +47,7 @@ def get_duration(input_video):
     ffprobe_cmd = "ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 {input_video}".format(input_video=input_video)
     return float(subprocess.check_output(ffprobe_cmd, shell=True).strip())
 
-def encode_segment(input_video, output_video, vheight, start_time, end_time, crf, need_deinterlacing):
+def encode_segment(input_video, output_video, vheight, start_time, end_time, crf, need_deinterlacing, complex_me):
     other_filter = ''
 
     if need_deinterlacing:
@@ -57,7 +57,7 @@ def encode_segment(input_video, output_video, vheight, start_time, end_time, crf
 
     x264_other_opt = ":me=umh:merange=32:subme=10"
     ffmpeg_cmd = 'ffmpeg -hide_banner -ss {start_time} -to {end_time} -i {input_video} -filter_complex "[0:v]{other_filter}scale={dst_res}[vout]" \
-            -map [vout] -an -c:v libx264 {common_settings} -profile:v {v_profilie} -level {v_level} -crf {crf} -x264opts no-scenecut:keyint=50:min-keyint=50 -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709  -f mp4 {output_video} -y'.format(
+            -map [vout] -an -c:v libx264 {common_settings} -profile:v {v_profilie} -level {v_level} -crf {crf} -x264opts no-scenecut:keyint=50:min-keyint=50{x264_other_opt} -pix_fmt yuv420p -color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709  -f mp4 {output_video} -y'.format(
                 input_video=input_video,
                 start_time=start_time,
                 end_time=end_time,
@@ -67,13 +67,13 @@ def encode_segment(input_video, output_video, vheight, start_time, end_time, crf
                 v_level=v_level,
                 dst_res=resolution,
                 crf=crf,
+                x264_other_opt=x264_other_opt if complex_me else "",
                 output_video=output_video,
             )
     print(ffmpeg_cmd)
     subprocess.call(ffmpeg_cmd, shell=True)
 
 def encode_segment_unpack(args):
-    print(args)
     return encode_segment(*args)
 
 def do_clean(segment_list):
@@ -94,7 +94,7 @@ def do_merge(segment_list, output_video):
         subprocess.call(ffmpeg_cmd, shell=True)
         do_clean(segment_list)
 
-def encode_final(input_video, output_video, vheight, seg_start_list, seg_duration_list, seg_crf_list, need_deinterlacing, poolsize):
+def encode_final(input_video, output_video, vheight, seg_start_list, seg_duration_list, seg_crf_list, need_deinterlacing, complex_me, max_thread):
     assert len(seg_duration_list), "Length of seg_duration_list and seg_start_list are not equal."
     assert len(seg_crf_list), "Length of seg_crf_list and seg_start_list are not equal."
 
@@ -109,12 +109,12 @@ def encode_final(input_video, output_video, vheight, seg_start_list, seg_duratio
         start_time = seg_start_list[seg_idx]
         end_time = start_time + seg_duration_list[seg_idx]
         seg_name = seg_format % seg_idx
-        cur_arg = [input_video, seg_name, vheight, start_time, end_time, seg_crf_list[seg_idx], need_deinterlacing]
+        cur_arg = [input_video, seg_name, vheight, start_time, end_time, seg_crf_list[seg_idx], need_deinterlacing, complex_me]
 
         arg_list.append(cur_arg)
         segment_list.append(seg_name)
         
-    pool = multiprocessing.Pool(processes=poolsize)
+    pool = multiprocessing.Pool(processes=max_thread)
     pool.map(encode_segment_unpack, arg_list)
     pool.close()
     pool.join()
@@ -160,8 +160,11 @@ if __name__ == '__main__':
     parser.add_argument('output_video', help='Output video file path.')
     parser.add_argument('video_height', help='Output video height.')
     parser.add_argument('segment_list', help='Segment crf list file, line format: seg_start, seg_duration, seg_crf')
+    parser.add_argument('--ref-scan-type', dest='ref_scan_type', help="Ref video scan type. interlaced or progressive", default="progressive")
+    parser.add_argument('--max-thread', dest='max_thread', help="Max threads to run splitted encoding", type=int, default=12)
+    parser.add_argument('--complex-me', dest='complex_me', help="Use more complex(but slower) -me x264 options to encode", action="store_true", default=False)
     args = parser.parse_args()
+
     seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list)
 
-    poolsize = 10
-    encode_final(args.input_video, args.output_video, args.video_height, seg_start_list, seg_duration_list, seg_crf_list, False, min(poolsize, len(seg_start_list)))
+    encode_final(args.input_video, args.output_video, args.video_height, seg_start_list, seg_duration_list, seg_crf_list, args.ref_scan_type == "interlaced", args.complex_me, min(args.max_thread, len(seg_start_list)))
