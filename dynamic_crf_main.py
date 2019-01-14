@@ -3,7 +3,8 @@ import sys
 import json, argparse
 
 import subprocess
-from dynamic_encode import encode_final
+#from dynamic_encode.crf import encode_crf_final
+import dynamic_encode
 
 COMMON_VIDEO_QUALITY_SETTINGS = '-vsync 0 -c:v libx264 -preset slow -psnr -b-pyramid normal -bf 3 -b_strategy 2 -err_detect compliant -mbtree 1 '
 
@@ -20,12 +21,21 @@ def get_duration(input_video):
     ffprobe_cmd = "ffprobe -v error -select_streams v:0 -show_entries stream=duration -of default=noprint_wrappers=1:nokey=1 {input_video}".format(input_video=input_video)
     return float(subprocess.check_output(ffprobe_cmd, shell=True).strip())
 
-def get_video_profile_and_level(v_height):
-    profile = None
+def get_video_settings(v_height):
+    success = False
     level = None
     resolution = ''
+    video_profile = None
+    tune = "film"
+    audio_codec_and_samplerate=''
+    audio_profile = None
+    audio_channel = None
+    audio_bitrate = None
+
     variant_string = '[{ "audio": { "profile": "aac_he", "channel": 1, "bitrate": 16, "codec": "mp4a.40.5" }, "video": { "width": 320, "height": 180, "profile": "baseline", "level": "1.2", "codec": "avc1.42C00C" }}, { "audio": { "profile": "aac_he", "channel": 2, "bitrate": 32, "codec": "mp4a.40.5" }, "video": { "width": 426, "height": 240, "profile": "baseline", "level": "2.1", "codec": "avc1.42C015" }}, { "audio": { "profile": "aac_he", "channel": 2, "bitrate": 32, "codec": "mp4a.40.5" }, "video": { "width": 640, "height": 360, "profile": "main", "level": "3", "codec": "avc1.4D401E" }}, { "audio": { "profile": "aac_he", "channel": 2, "bitrate": 48, "codec": "mp4a.40.5" }, "video": { "width": 854, "height": 480, "profile": "main", "level": "3.1", "codec": "avc1.4D401F" }}, { "audio": { "profile": "aac_he", "channel": 2, "bitrate": 48, "codec": "mp4a.40.5" }, "video": { "width": 1280, "height": 720, "profile": "main", "level": "3.1", "codec": "avc1.4D401F" }}, { "audio": { "profile": "aac_he", "channel": 2, "bitrate": 64, "codec": "mp4a.40.5" }, "video": { "width": 1920, "height": 1080, "profile": "high", "level": "4", "codec": "avc1.640028" }}]'
     variants_list = json.loads(variant_string)
+
+    item_found = False
     for variant in variants_list:
         video_item = variant.get('video')
 
@@ -35,11 +45,37 @@ def get_video_profile_and_level(v_height):
 
             if video_width is not None and video_height is not None:
                 if str(v_height) == str(video_height):
-                    profile  = video_item.get('profile')
+                    video_profile  = video_item.get('profile')
                     level = video_item.get('level')
                     resolution = "{}x{}".format(video_width, v_height)
-                    break
-    return profile, level, resolution
+                    if video_profile is not None and level is not None:
+                        item_found = True
+                    else:
+                        break
+        if item_found:
+            audio_item = variant.get('audio')
+            if audio_item is not None:
+                audio_profile = audio_item.get('profile')
+                audio_channel = audio_item.get('channel')
+                audio_bitrate = audio_item.get('bitrate')
+
+                if audio_profile is not None and audio_channel is not None and audio_bitrate is not None:
+                    # set audio codec, aac for aac_low, libfdk_aac for aac_he and aac_he_v2
+                    audio_codec_and_samplerate = '-c:a aac'
+                    if audio_profile in ['aac_he', 'aac_he_v2']:
+                        # for aac_he and aac_he_v2 we need to cap sample rate
+                        audio_codec_and_samplerate = '-c:a libfdk_aac -ar '
+                        #for 16kbps mono, samplereate should be 32000, https://hotstar.atlassian.net/browse/BJ-138
+                        if audio_bitrate <= 16:
+                            audio_codec_and_samplerate += '32000'
+                        else:
+                            audio_codec_and_samplerate += '44100'
+
+                    success = True
+
+            break
+    color_str = '-color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709'
+    return success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate
 
 def get_segment_list_equal_duration(input_video, seg_size = 10):
     duration = get_duration(input_video)
@@ -85,6 +121,35 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list, args.fixed_crf)
-    v_profile, v_level, v_resolution = get_video_profile_and_level(args.output_height)
+    success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate = get_video_settings(args.output_height)
 
-    encode_final(args.input_video, args.output_video, v_profile, v_level, v_resolution, seg_start_list, seg_duration_list, COMMON_VIDEO_QUALITY_SETTINGS, seg_crf_list, args.ref_scan_type == "interlaced", args.complex_me, args.gop, min(args.max_thread, len(seg_start_list)))
+    if not success:
+        print("Error getting video settings")
+        exit(-1)
+
+    video_filter = ""
+    if args.ref_scan_type == "interlaced":
+        video_filter = "yadif,"
+    audio_filter = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
+    dynamic_encode.encode_crf_final(
+        input_video = args.input_video,
+        output_video = args.output_video,
+        seg_start_list = seg_start_list,
+        seg_duration_list = seg_duration_list,
+        level = level,
+        resolution = resolution,
+        video_profile = video_profile,
+        video_filter = video_filter,
+        ffmpeg_common_settings = COMMON_VIDEO_QUALITY_SETTINGS,
+        seg_crf_list = seg_crf_list,
+        complex_me = args.complex_me,
+        gop = args.gop,
+        tune = tune,
+        color_str = color_str,
+        audio_codec_and_samplerate = audio_codec_and_samplerate,
+        audio_profile = audio_profile,
+        audio_channel = audio_channel,
+        audio_bitrate = audio_bitrate,
+        audio_filter = audio_filter,
+        max_thread = min(args.max_thread, len(seg_start_list)))
+
