@@ -113,6 +113,7 @@ if __name__ == '__main__':
     parser.add_argument('output_video', help='Output video file path.')
     parser.add_argument('output_height', help='Output video height.')
     parser.add_argument('segment_list', help='Segment crf list file, line format: seg_start, seg_duration, seg_crf')
+    parser.add_argument('--preroll', dest='preroll', help='Preroll video file path.')
     parser.add_argument('--ref-scan-type', dest='ref_scan_type', help="Ref video scan type. interlaced or progressive", default="progressive")
     parser.add_argument('--max-thread', dest='max_thread', help="Max threads to run splitted encoding", type=int, default=12)
     parser.add_argument('--complex-me', dest='complex_me', help="Use more complex(but slower) -me x264 options to encode", action="store_true", default=False)
@@ -121,7 +122,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list, args.fixed_crf)
-    success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate = get_video_settings(args.output_height)
+    success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, \
+        audio_profile, audio_channel, audio_bitrate = get_video_settings(args.output_height)
 
     if not success:
         print("Error getting video settings")
@@ -131,9 +133,12 @@ if __name__ == '__main__':
     if args.ref_scan_type == "interlaced":
         video_filter = "yadif,"
     audio_filter = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
+    audio_filter_preroll = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
+
     dynamic_encode.encode_crf_final(
         input_video = args.input_video,
         output_video = args.output_video,
+        preroll = args.preroll,
         seg_start_list = seg_start_list,
         seg_duration_list = seg_duration_list,
         level = level,
@@ -151,5 +156,6 @@ if __name__ == '__main__':
         audio_channel = audio_channel,
         audio_bitrate = audio_bitrate,
         audio_filter = audio_filter,
+        audio_filter_preroll = audio_filter_preroll,
         max_thread = min(args.max_thread, len(seg_start_list)))
 
