@@ -77,6 +77,20 @@ def get_video_settings(v_height):
     color_str = '-color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709'
     return success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate
 
+def encode_audio_stream():
+    ffmpeg_acmd = "{A_CODEC_AND_SAMPLERATE} -profile:a {A_PROFILE} -ac {A_CHANNEL} -b:a {A_BITRATE}k".format(
+                A_CODEC_AND_SAMPLERATE=audio_codec_and_samplerate,
+                A_PROFILE=audio_profile,
+                A_CHANNEL=audio_channel,
+                A_BITRATE=audio_bitrate,
+                A_FILTER=audio_filter,
+            )
+    print(ffmpeg_acmd)
+    ret = subprocess.call(ffmpeg_acmd, shell=True)
+    if ret != 0:
+        return None
+    return output_video
+
 def get_segment_list_equal_duration(input_video, seg_size = 10):
     duration = get_duration(input_video)
     seg_start_list = []
@@ -157,12 +171,6 @@ if __name__ == '__main__':
         gop = args.gop,
         tune = tune,
         color_str = color_str,
-        audio_codec_and_samplerate = audio_codec_and_samplerate,
-        audio_profile = audio_profile,
-        audio_channel = audio_channel,
-        audio_bitrate = audio_bitrate,
-        audio_filter = audio_filter,
-        audio_filter_preroll = audio_filter_preroll,
         non_ad_time_intervals = non_ad_time_intervals,
         max_thread = min(args.max_thread, len(seg_start_list)))
 
