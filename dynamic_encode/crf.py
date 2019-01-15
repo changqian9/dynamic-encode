@@ -6,7 +6,9 @@ import subprocess, multiprocessing
 
 from tool import do_merge, do_clean
 
-def encode_crf_segment(input_video, output_video, start_time, end_time, level, resolution, video_profile, video_filter, ffmpeg_common_settings, crf, complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate, audio_filter):
+def encode_crf_segment(input_video, output_video, start_time, end_time, level, resolution, video_profile, video_filter, \
+    ffmpeg_common_settings, crf, complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, \
+    audio_bitrate, audio_filter):
     # set audio codec, aac for aac_low, libfdk_aac for aac_he and aac_he_v2
     x264_other_opt = ':me=umh:merange=32:subme=10'
 
@@ -46,7 +48,10 @@ def encode_crf_segment(input_video, output_video, start_time, end_time, level, r
 def encode_crf_segment_unpack(args):
     return encode_crf_segment(*args)
 
-def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_duration_list, level, resolution, video_profile, video_filter, ffmpeg_common_settings, seg_crf_list, complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate, audio_filter, audio_filter_preroll, max_thread):
+def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_duration_list, level, resolution, video_profile, \
+    video_filter, ffmpeg_common_settings, seg_crf_list, complex_me, gop, tune, color_str, audio_codec_and_samplerate, \
+    audio_profile, audio_channel, audio_bitrate, audio_filter, audio_filter_preroll, non_ad_time_intervals, max_thread):
+
     assert len(seg_duration_list) == len(seg_start_list), "Length of seg_duration_list and seg_start_list are not equal."
     assert len(seg_crf_list) == len(seg_start_list), "Length of seg_crf_list and seg_start_list are not equal."
 
@@ -57,17 +62,69 @@ def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_dur
     segment_list = []
     arg_list = []
 
+    final_seg_start_list = []
+    final_seg_duration_list = []
+
+    if non_ad_time_intervals is not None and len(non_ad_time_intervals) > 0:
+        for interval_idx in range(len(non_ad_time_intervals)):
+            non_ad_start_time = non_ad_time_intervals[interval_idx][0]
+            non_ad_end_time = non_ad_time_intervals[interval_idx][1]
+
+            for seg_idx in range(len(seg_start_list)):
+                seg_start_time = seg_start_list[seg_idx]
+                seg_end_time = seg_start_time + seg_duration_list[seg_idx]
+
+                if seg_start_time >= seg_end_time:
+                    continue
+
+                if seg_start_time < non_ad_end_time:
+                    if seg_start_time >= non_ad_start_time:
+                        final_seg_start_list.append(seg_start_time)
+                        if seg_end_time <= non_ad_end_time:
+                            final_seg_duration_list.append(seg_duration_list[seg_idx])
+                            seg_duration_list[seg_idx] = -1.0 # mark as processed
+                        else:
+                            final_seg_duration_list.append(non_ad_end_time - seg_start_time)
+                            seg_duration_list[seg_idx] = -1.0
+                            seg_start_list.insert(seg_idx + 1, non_ad_end_time)
+                            seg_duration_list.insert(seg_idx + 1, seg_end_time - non_ad_end_time)
+                            break
+                    elif seg_end_time > non_ad_start_time:
+                    # seg_start_time < non_ad_start_time
+                        final_seg_start_list.append(non_ad_start_time)
+                        if seg_end_time <= non_ad_end_time:
+                            final_seg_duration_list.append(seg_end_time - non_ad_start_time)
+                            seg_duration_list[seg_idx] = -1.0
+                        else:
+                            final_seg_duration_list.append(non_ad_end_time - non_ad_start_time)
+                            seg_duration_list[seg_idx] = -1.0
+                            seg_start_list.insert(seg_idx + 1, non_ad_end_time)
+                            seg_duration_list.insert(seg_idx + 1, seg_end_time - non_ad_end_time)
+                            break
+
+    else:
+        final_seg_start_list = seg_start_list
+        final_seg_duration_list = seg_duration_list
+
+    print(final_seg_start_list, final_seg_duration_list)
+    seg_size = len(final_seg_start_list)
+
     if preroll is not None:
         seg_name = seg_format % 0
-        cur_arg = [preroll, seg_name, 0, 0, level, resolution, video_profile, video_filter, ffmpeg_common_settings, seg_crf_list[0], complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate, audio_filter_preroll]
+        cur_arg = [preroll, seg_name, 0, 0, level, resolution, video_profile, video_filter, ffmpeg_common_settings, \
+            seg_crf_list[0], complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, \
+            audio_bitrate, audio_filter_preroll]
+
         arg_list.append(cur_arg)
         segment_list.append(seg_name)
 
     for seg_idx in range(seg_size):
-        start_time = seg_start_list[seg_idx]
-        end_time = start_time + seg_duration_list[seg_idx]
+        start_time = final_seg_start_list[seg_idx]
+        end_time = start_time + final_seg_duration_list[seg_idx]
         seg_name = seg_format % (seg_idx + 1)
-        cur_arg = [input_video, seg_name, start_time, end_time, level, resolution, video_profile, video_filter, ffmpeg_common_settings, seg_crf_list[seg_idx], complex_me, gop, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate, audio_filter]
+        cur_arg = [input_video, seg_name, start_time, end_time, level, resolution, video_profile, video_filter, \
+            ffmpeg_common_settings, seg_crf_list[seg_idx], complex_me, gop, tune, color_str, audio_codec_and_samplerate, \
+            audio_profile, audio_channel, audio_bitrate, audio_filter]
 
         arg_list.append(cur_arg)
         segment_list.append(seg_name)

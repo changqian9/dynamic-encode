@@ -119,6 +119,7 @@ if __name__ == '__main__':
     parser.add_argument('--complex-me', dest='complex_me', help="Use more complex(but slower) -me x264 options to encode", action="store_true", default=False)
     parser.add_argument('--fixed-crf', dest='fixed_crf', help="Use fixed crf value instead of settings in segment_list. default 0(do not use)", type=int, default=0)
     parser.add_argument('--gop', dest='gop', help="GOP x264 option for final encoding. default 50", type=int, default=50)
+    parser.add_argument('--non_ad_time_intervals', dest='non_ad_time_intervals', help="None ad time intervals")
     args = parser.parse_args()
 
     seg_start_list, seg_duration_list, seg_crf_list = get_segment_list_from_file(args.segment_list, args.fixed_crf)
@@ -134,6 +135,11 @@ if __name__ == '__main__':
         video_filter = "yadif,"
     audio_filter = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
     audio_filter_preroll = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
+
+    non_ad_time_intervals = []
+    if args.non_ad_time_intervals is not None and len(args.non_ad_time_intervals) > 0:
+        for item in args.non_ad_time_intervals.split(";"):
+            non_ad_time_intervals.append(map(lambda x: float(x), item.split(",")))
 
     dynamic_encode.encode_crf_final(
         input_video = args.input_video,
@@ -157,5 +163,6 @@ if __name__ == '__main__':
         audio_bitrate = audio_bitrate,
         audio_filter = audio_filter,
         audio_filter_preroll = audio_filter_preroll,
+        non_ad_time_intervals = non_ad_time_intervals,
         max_thread = min(args.max_thread, len(seg_start_list)))
 
