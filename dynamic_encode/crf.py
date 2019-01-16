@@ -6,6 +6,8 @@ import subprocess, multiprocessing
 
 from tool import do_merge, do_clean
 
+THREAD_TIMEOUT = 8 * 60 * 60 # 8 hour
+
 def encode_crf_segment(input_video, output_video, start_time, end_time, level, resolution, video_profile, video_filter, \
     ffmpeg_common_settings, crf, complex_me, gop, tune, color_str):
     x264_other_opt = ':me=umh:merange=32:subme=10'
@@ -32,11 +34,8 @@ def encode_crf_segment(input_video, output_video, start_time, end_time, level, r
                 OUTPUT_VIDEO=output_video,
             )
 
-    print(ffmpeg_vcmd)
     ret = subprocess.call(ffmpeg_vcmd, shell=True)
-    if ret != 0:
-        return None
-    return output_video
+    return ret, ffmpeg_vcmd
 
 def encode_crf_segment_unpack(args):
     return encode_crf_segment(*args)
@@ -98,10 +97,9 @@ def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_dur
         final_seg_start_list = seg_start_list
         final_seg_duration_list = seg_duration_list
 
-    print(final_seg_start_list, final_seg_duration_list)
     seg_size = len(final_seg_start_list)
 
-    if preroll is not None:
+    if preroll is not None and len(preroll) > 0:
         seg_name = seg_format % 0
         cur_arg = [preroll, seg_name, 0, 0, level, resolution, video_profile, video_filter, ffmpeg_common_settings, \
             seg_crf_list[0], complex_me, gop, tune, color_str]
@@ -120,9 +118,20 @@ def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_dur
         segment_list.append(seg_name)
 
     pool = multiprocessing.Pool(processes=max_thread)
-    pool.map(encode_crf_segment_unpack, arg_list)
+    results = pool.map_async(encode_crf_segment_unpack, arg_list).get(THREAD_TIMEOUT)
     pool.close()
     pool.join()
-    do_merge(segment_list, output_video)
+
+    success = True
+
+    for r in results:
+        if r[0] != 0:
+            success = False
+            break;
+
+    if success:
+        results.append(do_merge(segment_list, output_video))
+
     do_clean(segment_list)
     os.removedirs(temp_dir)
+    return results

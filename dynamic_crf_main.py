@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import threading
 import sys
 import json, argparse
 
@@ -77,8 +78,50 @@ def get_video_settings(v_height):
     color_str = '-color_range tv -colorspace bt709 -color_trc bt709 -color_primaries bt709'
     return success, level, resolution, video_profile, tune, color_str, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate
 
-def encode_audio_stream():
-    ffmpeg_acmd = "{A_CODEC_AND_SAMPLERATE} -profile:a {A_PROFILE} -ac {A_CHANNEL} -b:a {A_BITRATE}k".format(
+def get_atrim_string(start_end_seconds_list, audio_in):
+    num = 0
+    trim_string = ''
+    stream_string = ''
+
+    if len(start_end_seconds_list) == 0:
+        return audio_in, ''
+    elif len(start_end_seconds_list) == 1:
+        trim_string += "[{audio_in}]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,afifo[aout]".format(
+            audio_in=audio_in, start=start_end_seconds_list[0][0], end=start_end_seconds_list[0][1])
+    else:
+        for i in start_end_seconds_list:
+            trim_string += "[{audio_in}]atrim=start={start}:end={end},asetpts=PTS-STARTPTS,afifo[a{str_num}];".format(
+                audio_in=audio_in, start=i[0], end=i[1], str_num=num)
+            stream_string += "[a{str_num}]".format(str_num=num)
+            num += 1
+
+        trim_string += "{stream_str}concat=n={num}:v=0:a=1[aout]".format(stream_str=stream_string, num=num)
+
+    return 'aout', trim_string
+
+
+def encode_audio_stream(input_video, output_audio, preroll, non_ad_time_intervals, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate):
+    preroll_str = ''
+    audio_filter = '[0:a:0][0:a:1]amerge=inputs=2[a_merged]'
+    if preroll is not None and len(preroll) > 0:
+        preroll_str = '-i ' + preroll
+        audio_filter += ';[1:a:0][1:a:1]amerge=inputs=2[a_merged_preroll]'
+
+    output_node, atrim_str= get_atrim_string(non_ad_time_intervals, 'a_merged')
+    if len(atrim_str) > 0:
+        audio_filter += ';' + atrim_str
+
+    map_name = 'aout_preroll'
+    if preroll is not None and len(preroll) > 0:
+        audio_filter += ';[a_merged_preroll][{OUTPUT_NODE}]concat=n=2:v=0:a=1[{MAP_NAME}]'.format(OUTPUT_NODE=output_node, MAP_NAME=map_name)
+    else:
+        map_name = output_node
+
+    ffmpeg_acmd = 'ffmpeg -i {INPUT_VIDEO} {PREROLL_STR} -filter_complex "{A_FILTER}" -vn -map [{MAP_NAME}] {A_CODEC_AND_SAMPLERATE} -profile:a {A_PROFILE} -ac {A_CHANNEL} -b:a {A_BITRATE}k {OUTPUT_AUDIO} -y'.format(
+                INPUT_VIDEO=input_video,
+                OUTPUT_AUDIO=output_audio,
+                PREROLL_STR=preroll_str,
+                MAP_NAME=map_name,
                 A_CODEC_AND_SAMPLERATE=audio_codec_and_samplerate,
                 A_PROFILE=audio_profile,
                 A_CHANNEL=audio_channel,
@@ -86,10 +129,7 @@ def encode_audio_stream():
                 A_FILTER=audio_filter,
             )
     print(ffmpeg_acmd)
-    ret = subprocess.call(ffmpeg_acmd, shell=True)
-    if ret != 0:
-        return None
-    return output_video
+    return subprocess.call(ffmpeg_acmd, shell=True)
 
 def get_segment_list_equal_duration(input_video, seg_size = 10):
     duration = get_duration(input_video)
@@ -121,6 +161,11 @@ def get_segment_list_from_file(list_file, fixed_crf):
             seg_crf_list.append(float(seg_items[2]) if fixed_crf == 0 else fixed_crf)
     return seg_start_list, seg_duration_list, seg_crf_list
 
+def compose_audio_video(output_video, video_stream, audio_stream):
+    ffmpeg_compose_cmd = 'ffmpeg -i {VIDEO_STREAM} -i {AUDIO_STREAM} -c copy {OUTPUT_VIDEO} -shortest -y'.format(OUTPUT_VIDEO=output_video, AUDIO_STREAM=audio_stream, VIDEO_STREAM=video_stream)
+    print(ffmpeg_compose_cmd)
+    return subprocess.call(ffmpeg_compose_cmd, shell=True)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Dynamic CRF encoding')
     parser.add_argument('input_video', help='Input video file path.')
@@ -147,17 +192,17 @@ if __name__ == '__main__':
     video_filter = ""
     if args.ref_scan_type == "interlaced":
         video_filter = "yadif,"
-    audio_filter = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
-    audio_filter_preroll = ";[0:a:0][0:a:1]amerge=inputs=2[aout]"
 
     non_ad_time_intervals = []
     if args.non_ad_time_intervals is not None and len(args.non_ad_time_intervals) > 0:
         for item in args.non_ad_time_intervals.split(";"):
             non_ad_time_intervals.append(map(lambda x: float(x), item.split(",")))
 
-    dynamic_encode.encode_crf_final(
+    thread_audio_enc = threading.Thread(target=encode_audio_stream, args=(args.input_video, 'test.m4a', args.preroll, non_ad_time_intervals, audio_codec_and_samplerate, audio_profile, audio_channel, audio_bitrate))
+    thread_audio_enc.start()
+    ret = dynamic_encode.encode_crf_final(
         input_video = args.input_video,
-        output_video = args.output_video,
+        output_video = "test.mp4",
         preroll = args.preroll,
         seg_start_list = seg_start_list,
         seg_duration_list = seg_duration_list,
@@ -173,4 +218,6 @@ if __name__ == '__main__':
         color_str = color_str,
         non_ad_time_intervals = non_ad_time_intervals,
         max_thread = min(args.max_thread, len(seg_start_list)))
-
+    thread_audio_enc.join()
+    compose_audio_video(args.output_video, "test.m4a", "test.mp4")
+    print(ret)

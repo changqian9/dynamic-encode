@@ -12,12 +12,10 @@ def do_merge(segment_list, output_video):
         for seg_video in segment_list:
             f.write("file '%s'\n" % seg_video)
         f.seek(0)
-        print(f.read())
         ffmpeg_cmd = 'ffmpeg -hide_banner -f concat -safe 0 -i {segment_list_file} -c copy {output_video} -y'.format(
                 segment_list_file=f.name,
                 output_video=output_video,
             )
-        print(ffmpeg_cmd)
-        subprocess.call(ffmpeg_cmd, shell=True)
-
-
+        ret = subprocess.call(ffmpeg_cmd, shell=True)
+        return ret, ffmpeg_cmd
+    return -1, "do_merge"
