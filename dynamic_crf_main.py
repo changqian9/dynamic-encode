@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import threading
-import sys
 import json, argparse
 
 import subprocess
