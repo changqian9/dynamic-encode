@@ -16,5 +16,5 @@ def do_merge(segment_list, output_video):
                 output_video=output_video,
             )
         ret = subprocess.call(ffmpeg_cmd, shell=True)
-        return ret, ffmpeg_cmd
+        return ret, ffmpeg_cmd + "\n" + f.read()
     return -1, "do_merge"

@@ -219,4 +219,5 @@ if __name__ == '__main__':
         max_thread = min(args.max_thread, len(seg_start_list)))
     thread_audio_enc.join()
     compose_audio_video(args.output_video, "test.m4a", "test.mp4")
-    print(ret)
+    for item in ret:
+        print("[%d] %s" % (item[0], item[1]))

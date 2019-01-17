@@ -40,22 +40,42 @@ def encode_crf_segment(input_video, output_video, start_time, end_time, level, r
 def encode_crf_segment_unpack(args):
     return encode_crf_segment(*args)
 
-def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_duration_list, level, resolution, video_profile,
-    video_filter, ffmpeg_common_settings, seg_crf_list, complex_me, gop, tune, color_str, non_ad_time_intervals, max_thread):
-
-    assert len(seg_duration_list) == len(seg_start_list), "Length of seg_duration_list and seg_start_list are not equal."
-    assert len(seg_crf_list) == len(seg_start_list), "Length of seg_crf_list and seg_start_list are not equal."
-
-    seg_size = len(seg_start_list)
-    temp_dir = tempfile.mkdtemp()
-    seg_format = temp_dir + '/seg_%d.mp4'
-
-    segment_list = []
-    arg_list = []
+def apply_non_ad_intervals(seg_start_list, seg_duration_list, seg_crf_list, non_ad_time_intervals):
+    assert len(seg_duration_list) > 0, "Error: segment list empty."
 
     final_seg_start_list = []
     final_seg_duration_list = []
     final_seg_crf_list = []
+
+    SEGMENT_MIN_IN_SECONDS = 0.25
+
+    # check whether non_ad segments are too short
+    for seg_idx in range(len(non_ad_time_intervals)):
+        assert non_ad_time_intervals[seg_idx][1] - non_ad_time_intervals[seg_idx][0] >= SEGMENT_MIN_IN_SECONDS * 2, "Error: non ad segment %d [%f , %f] is too short (< %f)" % (seg_idx, non_ad_time_intervals[seg_idx][0], non_ad_time_intervals[seg_idx][1], SEGMENT_MIN_IN_SECONDS * 2)
+
+    # check whether shot segments are consistent. check too small shot segments and merge it if exists
+    seg_idx = 0
+    while seg_idx < len(seg_duration_list) - 1:
+        while seg_idx < len(seg_duration_list) - 1 and seg_duration_list[seg_idx] < SEGMENT_MIN_IN_SECONDS:
+            assert seg_start_list[seg_idx] + seg_duration_list[seg_idx] == seg_start_list[seg_idx + 1], "Error: segments are not consistent."
+            seg_duration_list[seg_idx + 1] += seg_duration_list[seg_idx]
+            seg_start_list[seg_idx + 1] = seg_start_list[seg_idx]
+            seg_crf_list[seg_idx + 1] = min(seg_crf_list[seg_idx], seg_crf_list[seg_idx + 1])
+
+            seg_start_list.pop(seg_idx)
+            seg_duration_list.pop(seg_idx)
+            seg_crf_list.pop(seg_idx)
+
+        seg_idx += 1
+
+    # check whether last shot segment is too short and merge it if exists
+    if seg_duration_list[-1] < SEGMENT_MIN_IN_SECONDS:
+        assert len(seg_duration_list) > 1, "Error: segment is too short and can not be merged."
+        seg_duration_list[-2] += seg_duration_list[-1]
+        seg_crf_list[-2] = min(seg_crf_list[-2], seg_crf_list[-1])
+        seg_start_list.pop()
+        seg_duration_list.pop()
+        seg_crf_list.pop()
 
     if non_ad_time_intervals is not None and len(non_ad_time_intervals) > 0:
         for interval_idx in range(len(non_ad_time_intervals)):
@@ -104,6 +124,47 @@ def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_dur
         final_seg_start_list = seg_start_list
         final_seg_duration_list = seg_duration_list
         final_seg_crf_list = seg_crf_list
+
+    # check too small segments and merge it if exists
+    seg_idx = 0
+    while seg_idx < len(final_seg_start_list):
+        if final_seg_duration_list[seg_idx] < SEGMENT_MIN_IN_SECONDS:
+            if seg_idx < len(final_seg_start_list) - 1 and final_seg_start_list[seg_idx] + final_seg_duration_list[seg_idx] == final_seg_start_list[seg_idx + 1]:
+                # if cur segnet is adjacent with next segment
+                final_seg_duration_list[seg_idx + 1] += final_seg_duration_list[seg_idx]
+                final_seg_start_list[seg_idx + 1] = final_seg_start_list[seg_idx]
+                final_seg_crf_list[seg_idx + 1] = min(final_seg_crf_list[seg_idx], final_seg_crf_list[seg_idx + 1])
+            elif seg_idx > 0 and final_seg_start_list[seg_idx - 1] + final_seg_duration_list[seg_idx - 1] == final_seg_start_list[seg_idx]:
+                # if cur segnet is adjacent with previous segment
+                final_seg_duration_list[seg_idx - 1] += final_seg_duration_list[seg_idx]
+                final_seg_crf_list[seg_idx - 1] = min(final_seg_crf_list[seg_idx - 1], final_seg_crf_list[seg_idx])
+            else:
+                assert 0, "Error: too short segment and can not be merged, will result to encoding duration error"
+
+            final_seg_start_list.pop(seg_idx)
+            final_seg_duration_list.pop(seg_idx)
+            final_seg_crf_list.pop(seg_idx)
+            seg_idx -= 1
+
+        seg_idx += 1
+
+    return final_seg_start_list, final_seg_duration_list, final_seg_crf_list
+
+def encode_crf_final(input_video, output_video, preroll, seg_start_list, seg_duration_list, level, resolution, video_profile,
+    video_filter, ffmpeg_common_settings, seg_crf_list, complex_me, gop, tune, color_str, non_ad_time_intervals, max_thread):
+
+    assert len(seg_duration_list) == len(seg_start_list), "Length of seg_duration_list and seg_start_list are not equal."
+    assert len(seg_crf_list) == len(seg_start_list), "Length of seg_crf_list and seg_start_list are not equal."
+
+    seg_size = len(seg_start_list)
+    temp_dir = tempfile.mkdtemp()
+    seg_format = temp_dir + '/seg_%d.mp4'
+
+    segment_list = []
+    arg_list = []
+
+    final_seg_start_list, final_seg_duration_list, final_seg_crf_list = \
+        apply_non_ad_intervals(seg_start_list, seg_duration_list, seg_crf_list, non_ad_time_intervals)
 
     seg_size = len(final_seg_start_list)
 
