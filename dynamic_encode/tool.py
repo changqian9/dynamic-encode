@@ -1,11 +1,15 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
-import sys
+import os, sys
 import shutil, glob
 import tempfile
 import subprocess
 def do_clean(to_remove_dir):
     shutil.rmtree(to_remove_dir)
+
+def remove_segments(segment_list):
+    for seg_file in segment_list:
+        os.remove(seg_file)
 
 def do_merge(segment_list, output_video):
     with tempfile.NamedTemporaryFile(mode="w+t", dir=".", prefix="concat_seg_list") as f:
