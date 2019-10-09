@@ -8,9 +8,9 @@ DELETE_TEMP = False
 PROCESS_COUNT = 10
 PROCESS_TIMEOUT = 7* 24 * 60 * 60
 
-def generate_seg_info(source_video):
+def get_video_info(source_video):
     cur_start, total_dur, fps = parse_pts_bound(source_video)
-    return cur_start, 4, total_dur, fps
+    return cur_start, total_dur, fps
 
 def ffmpeg_worker(cmd):
     return os.popen(cmd).read()
@@ -36,14 +36,17 @@ def calc_vmaf(source_video, output_video, work_dir, need_deinterlace = False, su
 
 if __name__ == '__main__':
     if len(sys.argv) < 3:
-        print "%s source_file output_video" % sys.argv[0]
+        print "%s source_file output_video [seg_dur in seconds, default 4.0]" % sys.argv[0]
         exit(0)
 
     source_video = sys.argv[1]
     output_video = sys.argv[2]
+    seg_dur = 4.0
+    if len(sys.argv) >= 4:
+        seg_dur = float(sys.argv[3])
 
     work_dir = os.path.dirname(output_video) or "."
-    cur_start, seg_dur, total_dur, video_fps = generate_seg_info(source_video)
+    cur_start, total_dur, video_fps = get_video_info(source_video)
 
     idx = 0
     enccmd_list = []
