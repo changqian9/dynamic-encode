@@ -1,4 +1,5 @@
 ### Sample Command
+Command format: `vp9_enc.py source_file output_video n_split [seg_dur in seconds, default 4.0]`
 ```
-./dynamic_crf_main.py /opt/videosets/source/HD/KKBW_93/KKBW_93--20180724010609002--PG--2012.MXF output.mp4 480 segment_list_sample.txt [--non_ad_time_intervals "20,1000;1009,1200"] [--preroll /opt/videosets/source/HD/KKBW_93/Kulfi_HD.mxf]
+ python vp9_enc.py /large/videosets/source/hotstar/Baahubali.mov /large/videosets/output/baahubali_540p_sliced.webm 10 4.0
 ```
